@@ -1,2 +1,12 @@
 [build]
   publish = "static"
+
+[functions]
+  directory = "netlify/functions"
+
+# Die Seite ruft /api/vertretung auf -> Netlify Function
+[[redirects]]
+  from = "/api/vertretung"
+  to = "/.netlify/functions/vertretung"
+  status = 200
+  force = true
