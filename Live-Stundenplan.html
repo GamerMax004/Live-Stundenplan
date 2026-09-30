@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="de"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Live-Stundenplan</title>
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);--bg:#f6f7f9;--card:#fff;--tx:#1b1f24;--mu:#6b7280;--bd:#e2e5ea;--ac:#2563eb;--ent:#fee2e2;--entt:#b91c1c;--ver:#fef3c7;--vert:#92400e;--rau:#dbeafe;--raut:#1e40af}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#111418;--card:#1a1e24;--tx:#e8eaed;--mu:#9aa1ab;--bd:#2c323a;--ac:#60a5fa;--ent:#4c1d1d;--entt:#fca5a5;--ver:#4a3510;--vert:#fcd34d;--rau:#1e3a5f;--raut:#93c5fd}}
+:root[data-theme="dark"]{--bg:#111418;--card:#1a1e24;--tx:#e8eaed;--mu:#9aa1ab;--bd:#2c323a;--ac:#60a5fa;--ent:#4c1d1d;--entt:#fca5a5;--ver:#4a3510;--vert:#fcd34d;--rau:#1e3a5f;--raut:#93c5fd}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.35 system-ui,-apple-system,Segoe UI,sans-serif;padding:12px}
+h1{font-size:20px;margin:0 0 2px}.sub{color:var(--mu);font-size:13px;margin-bottom:10px}
+.bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+button{background:var(--card);color:var(--tx);border:1px solid var(--bd);border-radius:8px;padding:7px 11px;font:inherit;cursor:pointer}
+button.p{background:var(--ac);color:#fff;border-color:var(--ac)}
+.wk{font-weight:600;min-width:150px;text-align:center}
+.wrap{overflow-x:auto;border:1px solid var(--bd);border-radius:10px;background:var(--card)}
+table{border-collapse:collapse;width:100%;min-width:640px}
+th,td{border-bottom:1px solid var(--bd);border-right:1px solid var(--bd);padding:5px 6px;vertical-align:top;font-size:13px}
+th{background:var(--bg);font-size:12px;color:var(--mu)}th.today{color:var(--ac);border-bottom:2px solid var(--ac)}
+td.h{width:28px;text-align:center;color:var(--mu);font-weight:600}
+.c b{display:block;text-transform:uppercase}.c small{color:var(--mu)}
+.c.ent{background:var(--ent)}.c.ent b{text-decoration:line-through;color:var(--entt)}
+.c.ver{background:var(--ver)}.c.rau{background:var(--rau)}
+.tag{display:inline-block;font-size:11px;font-weight:700;border-radius:4px;padding:0 4px;margin-top:2px}
+.ent .tag{color:var(--entt)}.ver .tag{color:var(--vert)}.rau .tag{color:var(--raut)}
+.c .inf{font-size:11px;margin-top:2px}
+.panel{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:12px;margin-top:12px}
+.panel h2{font-size:15px;margin:0 0 8px}
+input,textarea{width:100%;box-sizing:border-box;background:var(--bg);color:var(--tx);border:1px solid var(--bd);border-radius:8px;padding:7px;font:inherit;margin-bottom:6px}
+textarea{min-height:90px;font-family:ui-monospace,monospace;font-size:12px}
+.hint{color:var(--mu);font-size:12px;margin:4px 0 8px}
+#st{font-size:13px;margin-top:6px}
+ul{padding-left:18px;margin:6px 0}
+</style></head><body>
+<h1>📅 Mein Stundenplan</h1>
+<div class="sub">Hollenberg-Gymnasium · <span id="upd">noch keine Vertretungsdaten geladen</span></div>
+<div class="bar">
+<button id="prev">‹</button><div class="wk" id="wk"></div><button id="next">›</button><button id="now">Heute</button>
+<button class="p" id="reload">↻ Aktualisieren</button>
+</div>
+<div class="wrap"><table id="tt"></table></div>
+<div class="panel"><h2>Änderungen dieser Woche</h2><ul id="list"></ul></div>
+
+<div class="panel"><h2>Datenquelle</h2>
+<div class="hint">Direktes Abrufen der Schulseite funktioniert nur, wenn der Server das im Browser erlaubt (CORS). Sonst: Daten unten einfügen oder eine eigene Proxy-URL eintragen. Zugangsdaten bleiben nur in diesem Browser (localStorage).</div>
+<input id="url" placeholder="Daten-URL (JSON oder HTML-Tabelle)">
+<input id="usr" placeholder="Benutzername"><input id="pw" type="password" placeholder="Passwort">
+<button id="save">Speichern &amp; laden</button>
+<div id="st"></div>
+<h2 style="margin-top:14px">Vertretungen einfügen</h2>
+<div class="hint">Tabelle aus dem Vertretungsplan kopieren (mit Kopfzeile: Datum/Tag, Stunde, Fach, Lehrer, Raum, Art, Info) oder JSON-Liste.</div>
+<textarea id="paste" placeholder="Datum&#9;Stunde&#9;Fach&#9;Vertreter&#9;Raum&#9;Art&#9;Info"></textarea>
+<button id="apply">Übernehmen</button> <button id="clear">Löschen</button>
+</div>
+
+<script>
+const PLAN={
+1:["ph/1|Str|29","ph/1|Str|29","m/2|Fri|506","m/2|Fri|506","ge/2|Mrx|407","ge/2|Mrx|407","","sp/3|Ths|Hei3","sp/3|Ths|Hei3"],
+2:["if/2|Stü|500","ph/1|Str|28","sw/1|Stl|419","sw/1|Stl|419","ch/2|Sdr|31","ch/2|Sdr|31","e5/2|Sum|509","",""],
+3:["d/1|Gsn|406","d/1|Gsn|406","bi/3|Smi|24","bi/3|Smi|24","m/2|Fri|506","ge/2|Mrx|407","sw/1|Stl|419","",""],
+4:["er/1|Mar|415","er/1|Mar|415","if/2|Stü|500","if/2|Stü|500","mu/1|Smt|73","mu/1|Smt|73","","",""],
+5:["bi/3|Smi|21","e5/2|Sum|509","e5/2|Sum|509","mu/1|Smt|72","er/1|Mar|415","d/1|Gsn|406","ch/2|Sdr|31","",""]};
+const TAGE=["Mo","Di","Mi","Do","Fr"];
+let S=null;try{S=JSON.parse(localStorage.getItem("sp")||"null")}catch(e){}
+S=S||{url:"",usr:"",pw:"",items:[],upd:""};
+const save=()=>{try{localStorage.setItem("sp",JSON.stringify(S))}catch(e){}};
+let mon=monday(new Date());
+function monday(d){d=new Date(d);d.setHours(0,0,0,0);d.setDate(d.getDate()-((d.getDay()+6)%7));return d}
+const fmt=d=>d.toLocaleDateString("de-DE",{day:"2-digit",month:"2-digit"});
+const key=d=>d.getFullYear()+"-"+(d.getMonth()+1)+"-"+d.getDate();
+const norm=s=>(s||"").toLowerCase().replace(/[^a-zäöüß0-9]/g,"");
+const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+function hours(s){s=String(s||"");const m=s.match(/(\d+)\s*[-–bis]+\s*(\d+)/);if(m){const a=+m[1],b=+m[2],r=[];for(let i=a;i<=b;i++)r.push(i);return r}const n=s.match(/\d+/g);return n?n.map(Number):[]}
+function dayOf(it){ // -> {idx, date|null}
+ const t=String(it.datum||it.tag||"");
+ const m=t.match(/(\d{1,2})\.(\d{1,2})\.?(\d{2,4})?/);
+ if(m){const y=m[3]?(+m[3]<100?2000+ +m[3]:+m[3]):mon.getFullYear();const d=new Date(y,+m[2]-1,+m[1]);return{idx:(d.getDay()+6)%7,date:d}}
+ const i=TAGE.findIndex(x=>t.toLowerCase().includes(x.toLowerCase()));return{idx:i,date:null}}
+function type(it){const a=norm(it.art+" "+it.info+" "+it.vertreter);
+ if(/entf|ausfall|frei|eva/.test(a)&&!/vertr/.test(norm(it.art)))return"ent";
+ if(/raum/.test(norm(it.art))&&!it.vertreter)return"rau";
+ if(/vertr|betr|verl|tausch/.test(a))return"ver";
+ return it.raum&&!it.vertreter?"rau":"ver"}
+function match(it,day,h,c){
+ const d=dayOf(it);if(d.idx!==day)return false;
+ if(d.date&&key(d.date)!==key(new Date(mon.getTime()+day*864e5)))return false;
+ if(!hours(it.stunde).includes(h))return false;
+ const f=norm(it.fach||it.kurs),cf=norm(c.split("|")[0]),base=cf.split(/\d/)[0];
+ return !f||f===cf||f.startsWith(base)&&(f.length<=base.length||!/\d/.test(f)||f===cf)}
+
+function render(){
+ const fr=new Date(mon.getTime()+4*864e5),today=key(new Date());
+ document.getElementById("wk").textContent=fmt(mon)+" – "+fmt(fr)+"."+fr.getFullYear();
+ let h="<tr><th></th>";
+ TAGE.forEach((t,i)=>{const d=new Date(mon.getTime()+i*864e5);h+=`<th class="${key(d)===today?"today":""}">${t} ${fmt(d)}</th>`});
+ h+="</tr>";const list=[];
+ for(let p=1;p<=9;p++){h+=`<tr><td class="h">${p}</td>`;
+  for(let d=0;d<5;d++){const c=PLAN[d+1][p-1];if(!c){h+="<td></td>";continue}
+   const [k,l,r]=c.split("|");const it=S.items.find(x=>match(x,d,p,c));let cls="",tag="",r2=r,l2=l,inf="";
+   if(it){cls=type(it);if(cls==="ent")tag="ENTFALL";else if(cls==="rau"){tag="RAUM";r2=it.raum||r}else{tag="VERTRETUNG";l2=it.vertreter||it.lehrer||l;if(it.raum)r2=it.raum}
+    inf=it.info||"";list.push(`${TAGE[d]} ${p}. Std ${k.split("/")[0].toUpperCase()}: ${tag}${l2!==l?" → "+l2:""}${r2!==r?" · Raum "+r2:""}${inf?" ("+inf+")":""}`)}
+   h+=`<td class="c ${cls}"><b>${esc(k)}</b><small>${esc(l2)} · ${esc(r2)}</small>${tag?`<span class="tag">${tag}</span>`:""}${inf?`<div class="inf">${esc(inf)}</div>`:""}</td>`}
+  h+="</tr>"}
+ document.getElementById("tt").innerHTML=h;
+ document.getElementById("list").innerHTML=list.length?[...new Set(list)].map(x=>"<li>"+esc(x)+"</li>").join(""):"<li>Keine Änderungen erkannt.</li>";
+ document.getElementById("upd").textContent=S.upd?"Vertretungsdaten: "+S.upd:"noch keine Vertretungsdaten geladen"}
+
+function mapRow(o){const r={};for(const k in o){const n=norm(k),v=o[k];
+ if(/datum|^tag$|day|date/.test(n))r.datum=v;else if(/stunde|std|zeit|hour/.test(n))r.stunde=v;
+ else if(/vertret|vertr|lehrer|lehrkraft|teacher|neu/.test(n))r.vertreter=v;
+ else if(/fach|subject|kurs/.test(n)&&!r.fach)r.fach=v;else if(/raum|room/.test(n))r.raum=v;
+ else if(/^art|typ|type/.test(n))r.art=v;else if(/info|text|bemerk|hinweis|note/.test(n))r.info=v}return r}
+function parseText(t){t=t.trim();if(!t)return[];
+ if(t[0]==="["||t[0]==="{"){try{let j=JSON.parse(t);if(!Array.isArray(j))j=j.items||j.data||j.vertretungen||Object.values(j).find(Array.isArray)||[];return j.map(mapRow)}catch(e){}}
+ if(t.startsWith("<")){const doc=new DOMParser().parseFromString(t,"text/html");const rows=[...doc.querySelectorAll("tr")].map(tr=>[...tr.children].map(c=>c.textContent.trim()));return fromRows(rows)}
+ return fromRows(t.split(/\r?\n/).map(l=>l.split(/\t|;/).map(s=>s.trim())))}
+function fromRows(rows){rows=rows.filter(r=>r.some(Boolean));if(rows.length<2)return[];const hd=rows[0];
+ return rows.slice(1).map(r=>{const o={};hd.forEach((k,i)=>o[k]=r[i]);return mapRow(o)})}
+function setSt(m){document.getElementById("st").textContent=m}
+async function load(){if(!S.url){setSt("Keine URL eingetragen – Daten bitte unten einfügen.");return}
+ try{const h={};if(S.usr)h.Authorization="Basic "+btoa(S.usr+":"+S.pw);
+  const r=await fetch(S.url,{headers:h});if(!r.ok)throw new Error("HTTP "+r.status);
+  S.items=parseText(await r.text());S.upd=new Date().toLocaleString("de-DE");save();setSt(S.items.length+" Einträge geladen.");render()}
+ catch(e){setSt("Abruf fehlgeschlagen ("+e.message+"). Wahrscheinlich blockiert CORS – nutze einen Proxy oder füge die Daten manuell ein.")}}
+const $=id=>document.getElementById(id);
+$("prev").onclick=()=>{mon=new Date(mon.getTime()-7*864e5);render()};
+$("next").onclick=()=>{mon=new Date(mon.getTime()+7*864e5);render()};
+$("now").onclick=()=>{mon=monday(new Date());render()};
+$("reload").onclick=load;
+$("save").onclick=()=>{S.url=$("url").value.trim();S.usr=$("usr").value;S.pw=$("pw").value;save();load()};
+$("apply").onclick=()=>{S.items=parseText($("paste").value);S.upd=new Date().toLocaleString("de-DE")+" (manuell)";save();setSt(S.items.length+" Einträge übernommen.");render()};
+$("clear").onclick=()=>{S.items=[];S.upd="";save();$("paste").value="";render()};
+$("url").value=S.url;$("usr").value=S.usr;$("pw").value=S.pw;
+render();if(S.url){load();setInterval(load,300000)}
+</script></body></html>
