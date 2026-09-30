@@ -42,9 +42,9 @@ ul{padding-left:18px;margin:6px 0}
 <div class="panel"><h2>Änderungen dieser Woche</h2><ul id="list"></ul></div>
 
 <div class="panel"><h2>Datenquelle</h2>
-<div class="hint">Direktes Abrufen der Schulseite funktioniert nur, wenn der Server das im Browser erlaubt (CORS). Sonst: Daten unten einfügen oder eine eigene Proxy-URL eintragen. Zugangsdaten bleiben nur in diesem Browser (localStorage).</div>
+<div class="hint">Standard ist <code>/api/vertretung</code>: Diese Seite holt den Vertretungsplan selbst von der Schulseite ab – bei jedem Öffnen und alle 5 Minuten. Der Plan der Schule ist passwortgeschützt: Benutzername und Passwort von der Schulseite hier eintragen. Sie bleiben nur in diesem Browser (localStorage).</div>
 <input id="url" placeholder="Daten-URL (JSON oder HTML-Tabelle)">
-<input id="stufe" placeholder="Stufe/Klasse (z. B. Q1)"><input id="usr" placeholder="Benutzername (optional)"><input id="pw" type="password" placeholder="Passwort">
+<input id="stufe" placeholder="Stufe/Klasse (z. B. EF)"><input id="usr" placeholder="Benutzername (optional)"><input id="pw" type="password" placeholder="Passwort">
 <button id="save">Speichern &amp; laden</button>
 <div id="st"></div>
 <h2 style="margin-top:14px">Vertretungen einfügen</h2>
@@ -62,10 +62,13 @@ const PLAN={
 5:["bi/3|Smi|21","e5/2|Sum|509","e5/2|Sum|509","mu/1|Smt|72","er/1|Mar|415","d/1|Gsn|406","ch/2|Sdr|31","",""]};
 const TAGE=["Mo","Di","Mi","Do","Fr"];
 let S=null;try{S=JSON.parse(localStorage.getItem("sp")||"null")}catch(e){}
-S=S||{url:"",usr:"",pw:"",items:[],upd:""};S.stufe=S.stufe||"Q1";if(!S.url)S.url="/api/vertretung";
+S=S||{url:"",usr:"",pw:"",items:[],upd:""};
+if(S.v!==2){S.v=2;S.stufe="EF";if(!S.url||/hollenberg/.test(S.url))S.url="/api/vertretung"} // Umstellung auf EF + eigenen Proxy
+S.stufe=S.stufe||"EF";if(!S.url)S.url="/api/vertretung";
 const addD=(d,n)=>{const x=new Date(d);x.setDate(x.getDate()+n);return x};
 const save=()=>{try{localStorage.setItem("sp",JSON.stringify(S))}catch(e){}};
-let mon=monday(new Date());
+const thisWeek=()=>{const d=new Date();if(d.getDay()===6||d.getDay()===0)d.setDate(d.getDate()+2);return monday(d)}; // am Wochenende: nächste Woche
+let mon=thisWeek();
 function monday(d){d=new Date(d);d.setHours(0,0,0,0);d.setDate(d.getDate()-((d.getDay()+6)%7));return d}
 const fmt=d=>d.toLocaleDateString("de-DE",{day:"2-digit",month:"2-digit"});
 const key=d=>d.getFullYear()+"-"+(d.getMonth()+1)+"-"+d.getDate();
@@ -84,12 +87,13 @@ function type(it){const a=norm(it.art);
  return"ver"}
 function match(it,day,h,c){
  if(!it.klasse)return false;
- const ks=String(it.klasse).split(",").map(x=>x.trim().toLowerCase());
- if(!ks.includes((S.stufe||"Q1").toLowerCase()))return false;
+ const ks=String(it.klasse).replace(/[()]/g,"").split(/[,\s]+/).map(norm);
+ if(!ks.includes(norm(S.stufe||"EF")))return false;
  const d=dayOf(it);if(d.idx!==day)return false;
  if(d.date&&key(d.date)!==key(addD(mon,day)))return false;
  if(!hours(it.stunde).includes(h))return false;
- return norm(String(it.orig||it.fach||"").split(/\s+/)[0])===norm(c.split("/")[0])}
+ const f=subj(it.orig)||subj(it.fach);return !!f&&f===subj(c.split("/")[0])}
+const subj=s=>(String(s||"").trim().toLowerCase().match(/^[a-zäöüß]+/)||[""])[0]; // "PH-GK1"/"ph1" -> "ph"
 
 function render(){
  const fr=addD(mon,4),today=key(new Date());
@@ -124,19 +128,30 @@ function parseText(t){t=t.trim();if(!t)return[];
 function fromRows(rows){rows=rows.filter(r=>r.some(Boolean));if(rows.length<2)return[];const hd=rows[0];
  return rows.slice(1).map(r=>{const o={};hd.forEach((k,i)=>o[k]=r[i]);return mapRow(o)})}
 function setSt(m){document.getElementById("st").textContent=m}
-async function load(){if(!S.url){setSt("Keine URL eingetragen – Daten bitte unten einfügen.");return}
- try{const h={};if(S.usr)h.Authorization="Basic "+btoa(S.usr+":"+S.pw);
-  const r=await fetch(S.url,{headers:h});if(!r.ok)throw new Error("HTTP "+r.status);
-  S.items=parseText(await r.text());S.upd=new Date().toLocaleString("de-DE");save();setSt(S.items.length+" Einträge geladen.");render()}
- catch(e){setSt("Abruf fehlgeschlagen ("+e.message+"). Wahrscheinlich blockiert CORS – nutze einen Proxy oder füge die Daten manuell ein.")}}
+let busy=false;
+async function load(force){if(!S.url){setSt("Keine URL eingetragen – Daten bitte unten einfügen.");return}
+ if(busy)return;busy=true;setSt("Lade aktuelle Vertretungsdaten …");
+ try{const h={};if(S.usr)h.Authorization="Basic "+btoa(unescape(encodeURIComponent(S.usr+":"+S.pw)));
+  const u=S.url+(force===true&&S.url.startsWith("/api/")?"?force=1":"");
+  const r=await fetch(u,{headers:h,cache:"no-store"});
+  if(r.status===401)throw new Error("Der Vertretungsplan der Schule ist passwortgeschützt – bitte unter „Datenquelle“ Benutzername und Passwort eintragen (dieselben wie auf der Schulseite).");
+  const t=await r.text();let j=null;try{j=JSON.parse(t)}catch(e){}
+  if(!r.ok)throw new Error((j&&j.error)||"HTTP "+r.status);
+  S.items=parseText(t);S.upd=(j&&j.stand?"Stand Schule "+j.stand+" · ":"")+"abgerufen "+new Date().toLocaleString("de-DE",{dateStyle:"short",timeStyle:"short"})+(j&&j.stale?" (Schule gerade nicht erreichbar, letzte Daten)":"");
+  save();const mine=S.items.filter(x=>norm(String(x.klasse).replace(/[()]/g,"")).includes(norm(S.stufe))).length;
+  setSt(S.items.length+" Einträge geladen, davon "+mine+" für "+S.stufe+".");render()}
+ catch(e){setSt("Abruf fehlgeschlagen: "+e.message)}finally{busy=false}}
 const $=id=>document.getElementById(id);
 $("prev").onclick=()=>{mon=addD(mon,-7);render()};
 $("next").onclick=()=>{mon=addD(mon,7);render()};
-$("now").onclick=()=>{mon=monday(new Date());render()};
-$("reload").onclick=load;
-$("save").onclick=()=>{S.url=$("url").value.trim();S.stufe=$("stufe").value.trim()||"Q1";S.usr=$("usr").value;S.pw=$("pw").value;save();load()};
+$("now").onclick=()=>{mon=thisWeek();render()};
+$("reload").onclick=()=>load(true);
+$("save").onclick=()=>{S.url=$("url").value.trim()||"/api/vertretung";S.stufe=$("stufe").value.trim()||"EF";S.usr=$("usr").value;S.pw=$("pw").value;save();load(true)};
 $("apply").onclick=()=>{S.items=parseText($("paste").value);S.upd=new Date().toLocaleString("de-DE")+" (manuell)";save();setSt(S.items.length+" Einträge übernommen.");render()};
 $("clear").onclick=()=>{S.items=[];S.upd="";save();$("paste").value="";render()};
 $("url").value=S.url;$("stufe").value=S.stufe;$("usr").value=S.usr;$("pw").value=S.pw;
 render();if(S.url){load();setInterval(load,300000)}
+// beim Zurückkehren zur Seite/App sofort neu laden
+document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")load()});
+addEventListener("pageshow",e=>{if(e.persisted)load()});
 </script></body></html>
